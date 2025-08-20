@@ -1,0 +1,12 @@
+# Binaries
+/bsemf
+*.exe
+*.out
+
+# Build folders
+/dist
+/bin
+/pkg
+
+# Env files
+.env
