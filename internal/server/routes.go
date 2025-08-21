@@ -21,5 +21,6 @@ func SetupRoutes(router *chi.Mux) {
 
 	router.Route(BaseUrl, func(r chi.Router) {
 		r.Get("/health", handlers.HealthHandler)
+		r.Post("/auth/getPassword", handlers.GetPasswordHandler)
 	})
 }
