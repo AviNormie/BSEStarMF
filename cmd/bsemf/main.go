@@ -4,7 +4,7 @@ import (
     "log"
     "net/http"
 
-    "github.com/AviNormie/BSEStarMF/internal/api"
+    "github.com/BrokingSapphire/BSEStarMF/internal/api"
 )
 
 func main() {

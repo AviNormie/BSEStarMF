@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/AviNormie/BSEStarMF/internal/bse"
+	"github.com/BrokingSapphire/BSEStarMF/internal/bse"
 )
 
 // UCCRegistrationHandler handles UCC registration requests
