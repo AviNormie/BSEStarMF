@@ -3,12 +3,11 @@ package bse
 import (
     "bytes"
     "fmt"
-    "io/ioutil"
+    "io"
     "net/http"
     "strings"
 )
 
-// Authenticate calls BSE SOAP API and parses the response, as per BSE docs
 func Authenticate(userID, password, passKey string) (string, string, error) {
     // Construct SOAP request based on your docs
     soapPayload := fmt.Sprintf(`
@@ -38,7 +37,7 @@ func Authenticate(userID, password, passKey string) (string, string, error) {
     defer resp.Body.Close()
 
     // Read response as string
-    responseBody, err := ioutil.ReadAll(resp.Body)
+    responseBody, err := io.ReadAll(resp.Body)
     if err != nil {
         return "", "", fmt.Errorf("failed to read response: %v", err)
     }

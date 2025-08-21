@@ -1,12 +1,12 @@
 package api
 
 import (
-    "encoding/json"
-    "net/http"
-    "bytes"
-    "io/ioutil"
-    "fmt"
-    "strings"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 )
 
 type AuthRequest struct {
@@ -27,7 +27,7 @@ func AuthHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Create SOAP Payload (based on your documentation)
+    // Create SOAP Payload 
     soapPayload := fmt.Sprintf(`
         <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:bses="http://bsestarmf.in/">
           <soap:Header xmlns:wsa="http://www.w3.org/2005/08/addressing">
@@ -54,7 +54,11 @@ func AuthHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
     defer resp.Body.Close()
-    body, _ := ioutil.ReadAll(resp.Body)
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        http.Error(w, "Failed to read response body: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
 
     // Extract Response (structure: "Code|EncryptedPassword")
     // Find getPasswordResult and parse it
