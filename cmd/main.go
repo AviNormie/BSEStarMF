@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"sapphirebroking.com/sapphire_mf/internal/config"
-	// "sapphirebroking.com/sapphire_mf/internal/consumer"  // Commented out
-	// "sapphirebroking.com/sapphire_mf/internal/processor" // Commented out
+	"sapphirebroking.com/sapphire_mf/internal/consumer"
+	"sapphirebroking.com/sapphire_mf/internal/processor"
 	"sapphirebroking.com/sapphire_mf/internal/server"
 	"sapphirebroking.com/sapphire_mf/internal/util"
 )
 
-func main() {
+func main(){
 	logger := util.NewStandardLogger()
 
 	// Load configuration
@@ -24,28 +24,28 @@ func main() {
 	}
 	logger.Info("Configuration loaded successfully.")
 
-	// Initialize message processor - COMMENTED OUT
-	// msgProcessor := processor.NewProcessor(logger)
-	// logger.Info("Message processor initialized.")
+	// Initialize message processor
+	msgProcessor := processor.NewProcessor(logger)
+	logger.Info("Message processor initialized.")
 
-	// Initialize Kafka consumer - COMMENTED OUT
-	// kafkaConsumer, err := consumer.NewConsumer(cfg.Kafka, msgProcessor, logger)
-	// if err != nil {
-	//	logger.Fatal("Failed to create kafka consumer: %v", err)
-	// }
-	// logger.Info("Kafka consumer initialized.")
+	// Initialize Kafka consumer
+	kafkaConsumer, err := consumer.NewConsumer(cfg.Kafka, msgProcessor, logger)
+	if err != nil {
+		logger.Fatal("Failed to create kafka consumer: %v", err)
+	}
+	logger.Info("Kafka consumer initialized.")
 
 	// Initialize HTTP server
 	httpServer := server.NewHTTPServer(cfg.Service, logger)
 	logger.Info("HTTP server initialized.")
 
-	// Create context for graceful shutdown - COMMENTED OUT
-	// ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Start Kafka consumer in goroutine - COMMENTED OUT
-	// go kafkaConsumer.Start(ctx)
-	// logger.Info("Kafka consumer started.")
+	// Start Kafka consumer in goroutine
+	go kafkaConsumer.Start(ctx)
+	logger.Info("Kafka consumer started.")
 
 	// Start HTTP server in goroutine
 	go httpServer.Start()
@@ -62,12 +62,12 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	// Cancel the main context to stop Kafka consumer - COMMENTED OUT
-	// cancel()
+	// Cancel the main context to stop Kafka consumer
+	cancel()
 
-	// Shutdown Kafka consumer - COMMENTED OUT
-	// kafkaConsumer.Shutdown()
-	// logger.Info("Kafka consumer shutdown complete.")
+	// Shutdown Kafka consumer
+	kafkaConsumer.Shutdown()
+	logger.Info("Kafka consumer shutdown complete.")
 
 	// Shutdown HTTP server
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -76,4 +76,5 @@ func main() {
 	logger.Info("HTTP server shutdown complete.")
 
 	logger.Info("Shutdown complete")
-}
+
+} 
