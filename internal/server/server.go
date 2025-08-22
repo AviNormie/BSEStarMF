@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"sapphirebroking.com/sapphire_mf/internal/config"
 	"sapphirebroking.com/sapphire_mf/internal/util"
 )
@@ -20,15 +19,12 @@ type HTTPServer struct {
 const BaseUrl string = "/api/v1"
 
 func NewHTTPServer(cfg *config.ServiceConfig, logger util.Logger) *HTTPServer {
-	// Create Chi router
-	router := chi.NewRouter()
-
 	hs := &HTTPServer{
 		logger: logger,
 	}
 
-	// Setup routes with middleware
-	SetupRoutes(router)
+	// Setup routes - pass logger instead of router
+	router := SetupRoutes(logger)
 
 	// Determine the address to bind to
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
