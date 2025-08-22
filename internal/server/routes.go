@@ -22,5 +22,13 @@ func SetupRoutes(router *chi.Mux) {
 	router.Route(BaseUrl, func(r chi.Router) {
 		r.Get("/health", handlers.HealthHandler)
 		r.Post("/auth/getPassword", handlers.GetPasswordHandler)
+		
+		// SOAP-based SIP/XSIP Registration and Cancellation endpoints
+		r.Post("/sip/order", handlers.SIPHandler)
+		r.Post("/xsip/order", handlers.XSIPHandler)
+		
+		// Enhanced JSON-based SIP/XSIP Cancellation endpoints
+		r.Post("/enhanced/sip/cancellation", handlers.EnhancedSIPCancellationHandler)
+		r.Post("/enhanced/xsip/cancellation", handlers.EnhancedXSIPCancellationHandler)
 	})
 }
