@@ -19,63 +19,65 @@ func init() {
 }
 
 // EnhancedSIPCancellationHandler handles Enhanced SIP cancellation requests
-func EnhancedSIPCancellationHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Method not allowed",
-		})
-		return
+func EnhancedSIPCancellationHandler(enhancedSipService *services.SOAPClientService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Method not allowed",
+			})
+			return
+		}
+		
+		// Check if service is available
+		if enhancedSipService == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Service unavailable",
+			})
+			return
+		}
+		
+		var req services.EnhancedSIPCancellationRequest // Changed from types to services
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Invalid JSON payload",
+			})
+			return
+		}
+		
+		// Validate required fields
+		if err := validateEnhancedSIPRequest(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   err.Error(),
+				Code:    "VALIDATION_ERROR",
+			})
+			return
+		}
+		
+		// Call BSE Enhanced API service
+		sipResp, err := enhancedSipService.EnhancedSIPCancellation(r.Context(), &req)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Failed to process Enhanced SIP cancellation request",
+			})
+			return
+		}
+		
+		// Return response
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sipResp)
 	}
-	
-	// Check if service is available
-	if enhancedSipService == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Service unavailable",
-		})
-		return
-	}
-	
-	var req services.EnhancedSIPCancellationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Invalid JSON payload",
-		})
-		return
-	}
-	
-	// Validate required fields
-	if err := validateEnhancedSIPRequest(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   err.Error(),
-			Code:    "VALIDATION_ERROR",
-		})
-		return
-	}
-	
-	// Call BSE Enhanced API service
-	sipResp, err := enhancedSipService.EnhancedSIPCancellation(r.Context(), &req)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Failed to process Enhanced SIP cancellation request",
-		})
-		return
-	}
-	
-	// Return response
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(sipResp)
 }
 
 func validateEnhancedSIPRequest(req *services.EnhancedSIPCancellationRequest) error {

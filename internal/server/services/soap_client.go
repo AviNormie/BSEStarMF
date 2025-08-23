@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/hooklift/gowsdl/soap"
 	"sapphirebroking.com/sapphire_mf/myservice"
+
+	"sapphirebroking.com/sapphire_mf/internal/server/types"
 	"strings"
 	"time"
 )
@@ -335,6 +337,110 @@ func (s *SOAPClientService) XSIPOrderEntry(ctx context.Context, req *XSIPRequest
 	}
 	
 	return parseXSIPResponse(*response.XsipOrderEntryParamResult, req), nil
+}
+
+// LumpsumOrderEntry processes lumpsum mutual fund orders
+func (s *SOAPClientService) LumpsumOrderEntry(ctx context.Context, req *types.LumpsumOrderRequest) (*types.LumpsumOrderResponse, error) {
+	// Create SOAP request
+	soapReq := &myservice.OrderEntryParam{
+		TransCode:    stringPtr(req.TransCode),
+		TransNo:      stringPtr(req.TransNo),
+		OrderId:      stringPtr(req.OrderId),
+		UserID:       stringPtr(req.UserID),
+		MemberId:     stringPtr(req.MemberId),
+		ClientCode:   stringPtr(req.ClientCode),
+		SchemeCd:     stringPtr(req.SchemeCd),
+		BuySell:      stringPtr(req.BuySell),
+		BuySellType:  stringPtr(req.BuySellType),
+		DPTxn:        stringPtr(req.DPTxn),
+		OrderVal:     stringPtr(req.OrderVal),
+		Qty:          stringPtr(req.Qty),
+		AllRedeem:    stringPtr(req.AllRedeem),
+		FolioNo:      stringPtr(req.FolioNo),
+		Remarks:      stringPtr(req.Remarks),
+		KYCStatus:    stringPtr(req.KYCStatus),
+		RefNo:        stringPtr(req.RefNo),
+		SubBrCode:    stringPtr(req.SubBrCode),
+		EUIN:         stringPtr(req.EUIN),
+		EUINVal:      stringPtr(req.EUINVal),
+		MinRedeem:    stringPtr(req.MinRedeem),
+		DPC:          stringPtr(req.DPC),
+		IPAdd:        stringPtr(req.IPAdd),
+		Password:     stringPtr(req.Password),
+		PassKey:      stringPtr(req.PassKey),
+		Parma1:       stringPtr(req.Parma1), // Note: keeping the typo from types
+		Param2:       stringPtr(req.Param2),
+		Param3:       stringPtr(req.Param3),
+		MobileNo:     stringPtr(req.MobileNo),
+		EmailID:      stringPtr(req.EmailID),
+		MandateID:    stringPtr(req.MandateID),
+		Filler1:      stringPtr(req.Filler1),
+		Filler2:      stringPtr(req.Filler2),
+		Filler3:      stringPtr(req.Filler3),
+		Filler4:      stringPtr(req.Filler4),
+		Filler5:      stringPtr(req.Filler5),
+		Filler6:      stringPtr(req.Filler6),
+	}
+
+	result, err := s.client.OrderEntryParam(soapReq)
+	if err != nil {
+		return &types.LumpsumOrderResponse{
+			Success: false,
+			Message: fmt.Sprintf("SOAP call failed: %v", err),
+		}, nil
+	}
+
+	// Parse response - FIX: Handle pointer dereference
+	var responseStr string
+	if result.OrderEntryParamResult != nil {
+		responseStr = *result.OrderEntryParamResult
+	}
+	return parseLumpsumResponse(responseStr, req), nil
+}
+
+// parseLumpsumResponse parses the BSE SOAP response for lumpsum orders
+func parseLumpsumResponse(result string, req *types.LumpsumOrderRequest) *types.LumpsumOrderResponse {
+	response := &types.LumpsumOrderResponse{
+		TransCode:  req.TransCode,
+		TransNo:    req.TransNo,
+		UserID:     req.UserID,
+		MemberId:   req.MemberId,
+		ClientCode: req.ClientCode,
+	}
+
+	if result == "" {
+		response.Success = false
+		response.Message = "Empty response from BSE"
+		return response
+	}
+
+	// Parse pipe-delimited response
+	fields := strings.Split(result, "|")
+	if len(fields) < 4 {
+		response.Success = false
+		response.Message = "Invalid response format from BSE"
+		return response
+	}
+
+	// Extract fields based on BSE response format
+	response.OrderId = strings.TrimSpace(fields[0])
+	response.SuccessFlag = strings.TrimSpace(fields[1])
+	if len(fields) > 2 {
+		response.Remarks = strings.TrimSpace(fields[2])
+	}
+
+	// Determine success based on SuccessFlag
+	response.Success = response.SuccessFlag == "Y"
+	if !response.Success {
+		response.Message = response.Remarks
+		if response.Message == "" {
+			response.Message = "Order failed"
+		}
+	} else {
+		response.Message = "Order placed successfully"
+	}
+
+	return response
 }
 
 func (s *SOAPClientService) getErrorMessage(code string) string {

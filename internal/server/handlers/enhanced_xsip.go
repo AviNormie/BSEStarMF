@@ -19,63 +19,65 @@ func init() {
 }
 
 // EnhancedXSIPCancellationHandler handles Enhanced XSIP/ISIP cancellation requests
-func EnhancedXSIPCancellationHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Method not allowed",
-		})
-		return
+func EnhancedXSIPCancellationHandler(enhancedXsipService *services.SOAPClientService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Method not allowed",
+			})
+			return
+		}
+		
+		// Check if service is available
+		if enhancedXsipService == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Service unavailable",
+			})
+			return
+		}
+		
+		var req services.EnhancedXSIPCancellationRequest // Changed from types to services
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Invalid JSON payload",
+			})
+			return
+		}
+		
+		// Validate required fields
+		if err := validateEnhancedXSIPRequest(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   err.Error(),
+				Code:    "VALIDATION_ERROR",
+			})
+			return
+		}
+		
+		// Call BSE Enhanced API service
+		xsipResp, err := enhancedXsipService.EnhancedXSIPCancellation(r.Context(), &req)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Error:   "Failed to process Enhanced XSIP cancellation request",
+			})
+			return
+		}
+		
+		// Return response
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(xsipResp)
 	}
-	
-	// Check if service is available
-	if enhancedXsipService == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Service unavailable",
-		})
-		return
-	}
-	
-	var req services.EnhancedXSIPCancellationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Invalid JSON payload",
-		})
-		return
-	}
-	
-	// Validate required fields
-	if err := validateEnhancedXSIPRequest(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   err.Error(),
-			Code:    "VALIDATION_ERROR",
-		})
-		return
-	}
-	
-	// Call BSE Enhanced API service
-	xsipResp, err := enhancedXsipService.EnhancedXSIPCancellation(r.Context(), &req)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Failed to process Enhanced XSIP cancellation request",
-		})
-		return
-	}
-	
-	// Return response
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(xsipResp)
 }
 
 func validateEnhancedXSIPRequest(req *services.EnhancedXSIPCancellationRequest) error {
