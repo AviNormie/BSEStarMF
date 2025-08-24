@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sapphirebroking.com/sapphire_mf/internal/server/services"
+	"sapphirebroking.com/sapphire_mf/internal/util"
 	"strings"
 )
 
@@ -28,15 +29,9 @@ type ErrorResponse struct {
 	Code    string `json:"code,omitempty"`
 }
 
-var soapService *services.SOAPClientService
-
-func init() {
-	var err error
-	soapService, err = services.NewSOAPClientService()
-	if err != nil {
-		// Log error but don't panic - handle gracefully in handler
-	}
-}
+// Remove the global variable and init() function
+// var soapService *services.SOAPClientService
+// func init() { ... }
 
 func GetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -50,8 +45,10 @@ func GetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// Check if SOAP service is available
-	if soapService == nil {
+	// Create logger and SOAP service within the handler
+	logger := util.NewStandardLogger()
+	soapService, err := services.NewSOAPClientService(logger)
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ErrorResponse{
 			Success: false,
@@ -61,7 +58,7 @@ func GetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	var req GetPasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(ErrorResponse{
 			Success: false,

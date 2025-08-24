@@ -5,23 +5,74 @@ import (
 	"fmt"
 	"github.com/hooklift/gowsdl/soap"
 	"sapphirebroking.com/sapphire_mf/myservice"
+	"sapphirebroking.com/sapphire_mf/internal/util"
 	"strings"
 	"time"
 )
 
+// Update the struct to include Enhanced API client
 type SOAPClientService struct {
-	client myservice.MFOrderEntry
+	client      myservice.MFOrderEntry
+	logger      util.Logger
+	enhancedAPI *EnhancedAPIClient
 }
 
-func NewSOAPClientService() (*SOAPClientService, error) {
-	url := "https://bsestarmfdemo.bseindia.com/MFOrderEntry/MFOrder.svc"
+// Update constructor
+func NewSOAPClientService(logger util.Logger) (*SOAPClientService, error) {
+    url := "http://bsestarmfdemo.bseindia.com/MFOrderEntry/MFOrder.svc"
+    
+    fmt.Printf("[DEBUG] SOAP Client URL: %s\n", url)
+    
+    soapClient := soap.NewClient(url)
+    mfClient := myservice.NewMFOrderEntry(soapClient)
+    
+    return &SOAPClientService{
+        client:      mfClient,
+        logger:      logger,
+        enhancedAPI: NewEnhancedAPIClient(logger),
+    }, nil
+}
+
+// Enhanced SIP Cancellation - LIVE API Integration (KEEP ONLY THIS ONE)
+func (s *SOAPClientService) EnhancedSIPCancellation(ctx context.Context, req *EnhancedSIPCancellationRequest) (*EnhancedSIPCancellationResponse, error) {
+	s.logger.Info("[DEBUG] Enhanced SIP Cancellation called - LIVE API")
 	
-	soapClient := soap.NewClient(url)
-	mfClient := myservice.NewMFOrderEntry(soapClient)
+	// Call the LIVE BSE Enhanced API
+	response, err := s.enhancedAPI.CallEnhancedSIPCancellation(ctx, req)
+	if err != nil {
+		s.logger.Error("[ERROR] LIVE Enhanced SIP API call failed: %v", err)
+		// Return error response with actual error details
+		return &EnhancedSIPCancellationResponse{
+			SIPRegID:    req.RegnNo,
+			BSERemarks:  fmt.Sprintf("LIVE API Error: %v", err),
+			SuccessFlag: "1", // 1 = Failure
+			IntRefNo:    req.IntRefNo,
+		}, nil
+	}
 	
-	return &SOAPClientService{
-		client: mfClient,
-	}, nil
+	s.logger.Info("[DEBUG] LIVE Enhanced SIP API call succeeded")
+	return response, nil
+}
+
+// Enhanced XSIP Cancellation - LIVE API Integration (KEEP ONLY THIS ONE)
+func (s *SOAPClientService) EnhancedXSIPCancellation(ctx context.Context, req *EnhancedXSIPCancellationRequest) (*EnhancedXSIPCancellationResponse, error) {
+	s.logger.Info("[DEBUG] Enhanced XSIP Cancellation called - LIVE API")
+	
+	// Call the LIVE BSE Enhanced API
+	response, err := s.enhancedAPI.CallEnhancedXSIPCancellation(ctx, req)
+	if err != nil {
+		s.logger.Error("[ERROR] LIVE Enhanced XSIP API call failed: %v", err)
+		// Return error response with actual error details
+		return &EnhancedXSIPCancellationResponse{
+			XSIPRegID:   req.RegnNo,
+			BSERemarks:  fmt.Sprintf("LIVE API Error: %v", err),
+			SuccessFlag: "1", // 1 = Failure
+			IntRefNo:    req.IntRefNo,
+		}, nil
+	}
+	
+	s.logger.Info("[DEBUG] LIVE Enhanced XSIP API call succeeded")
+	return response, nil
 }
 
 type AuthResponse struct {
@@ -209,6 +260,8 @@ func (s *SOAPClientService) Authenticate(ctx context.Context, userID, password, 
 
 // SIPOrderEntry handles SIP registration and cancellation
 func (s *SOAPClientService) SIPOrderEntry(ctx context.Context, req *SIPRequest) (*SIPOrderResponse, error) {
+	fmt.Printf("[DEBUG] SIPOrderEntry called\n")
+	
 	// Create context with timeout for SOAP call
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -244,30 +297,37 @@ func (s *SOAPClientService) SIPOrderEntry(ctx context.Context, req *SIPRequest) 
 		Param2:           &req.Param2,
 		Param3:           &req.Param3,
 		Filler1:          &req.Filler1,
-		Filler2:          &req.Filler2, // BSE Code
-		Filler3:          &req.Filler3, // BSE Code Remark
+		Filler2:          &req.Filler2,
+		Filler3:          &req.Filler3,
 		Filler4:          &req.Filler4,
 		Filler5:          &req.Filler5,
 		Filler6:          &req.Filler6,
 	}
 	
+	fmt.Printf("[DEBUG] About to call BSE SOAP service...\n")
+	
 	// Call SOAP service
 	response, err := s.client.SipOrderEntryParamContext(ctxWithTimeout, soapRequest)
 	if err != nil {
+		fmt.Printf("[ERROR] BSE SOAP call failed: %v\n", err)
 		return &SIPOrderResponse{
 			Success: false,
-			Message: "Failed to connect to BSE service",
+			Message: fmt.Sprintf("Failed to connect to BSE service: %v", err),
 		}, nil
 	}
 	
+	fmt.Printf("[DEBUG] BSE SOAP call succeeded\n")
+	
 	// Parse response
 	if response.SipOrderEntryParamResult == nil {
+		fmt.Printf("[DEBUG] Empty response from BSE\n")
 		return &SIPOrderResponse{
 			Success: false,
 			Message: "Empty response from BSE service",
 		}, nil
 	}
 	
+	fmt.Printf("[DEBUG] BSE Response: %s\n", *response.SipOrderEntryParamResult)
 	return parseSIPResponse(*response.SipOrderEntryParamResult, req), nil
 }
 
@@ -485,47 +545,4 @@ type EnhancedXSIPCancellationResponse struct {
 	BSERemarks  string `json:"BSERemarks"`
 	SuccessFlag string `json:"SuccessFlag"` // 0 - Success & 1 - failure
 	IntRefNo    string `json:"IntRefNo"`
-}
-
-// Enhanced XSIP/ISIP Cancellation Service Method
-func (s *SOAPClientService) EnhancedXSIPCancellation(ctx context.Context, req *EnhancedXSIPCancellationRequest) (*EnhancedXSIPCancellationResponse, error) {
-	// Create context with timeout for API call
-	_, cancel := context.WithTimeout(ctx, 30*time.Second) // Fixed: Removed unused ctxWithTimeout
-	defer cancel()
-	
-	// This would call the BSE Enhanced API endpoint
-	// URL: https://bsestarmfdemo.bseindia.com/StarMFAPI/api/XSIP/XSIPCancellation
-	// For now, we'll simulate the response structure
-	// In production, you would make HTTP request to BSE Enhanced API
-	
-	// Simulate BSE Enhanced API response
-	response := &EnhancedXSIPCancellationResponse{
-		XSIPRegID:   req.RegnNo,
-		BSERemarks:  "XSIP CANCELLED SUCCESSFULLY",
-		SuccessFlag: "0", // 0 = Success
-		IntRefNo:    req.IntRefNo,
-	}
-	
-	return response, nil
-}
-
-// Enhanced SIP Cancellation Service Method
-func (s *SOAPClientService) EnhancedSIPCancellation(ctx context.Context, req *EnhancedSIPCancellationRequest) (*EnhancedSIPCancellationResponse, error) {
-	// Create context with timeout for API call
-	_, cancel := context.WithTimeout(ctx, 30*time.Second) // Fixed: Removed unused ctxWithTimeout
-	defer cancel()
-	
-	// This would call the BSE Enhanced API endpoint
-	// For now, we'll simulate the response structure
-	// In production, you would make HTTP request to BSE Enhanced API
-	
-	// Simulate BSE Enhanced API response
-	response := &EnhancedSIPCancellationResponse{
-		SIPRegID:    req.RegnNo,
-		BSERemarks:  "SIP CANCELLED SUCCESSFULLY",
-		SuccessFlag: "0", // 0 = Success
-		IntRefNo:    req.IntRefNo,
-	}
-	
-	return response, nil
 }

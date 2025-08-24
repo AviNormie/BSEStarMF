@@ -1,64 +1,136 @@
 package handlers
 
 import (
-	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 	"sapphirebroking.com/sapphire_mf/internal/server/services"
+	"sapphirebroking.com/sapphire_mf/internal/util"
 	"strings"
 )
 
-var xsipSoapService *services.SOAPClientService
-
-func init() {
-	var err error
-	xsipSoapService, err = services.NewSOAPClientService()
-	if err != nil {
-		// Log error but don't panic - handle gracefully in handler
-	}
+// SOAP Envelope structure for XSIP requests
+type XSIPSOAPEnvelope struct {
+	XMLName xml.Name `xml:"soap:Envelope"`
+	SoapNS  string   `xml:"xmlns:soap,attr"`
+	Body    XSIPSOAPBody `xml:"soap:Body"`
 }
 
-// XSIPHandler handles XSIP registration and cancellation requests
+type XSIPSOAPBody struct {
+	XSIPRequest XSIPSOAPRequest `xml:"XsipOrderEntryParam"`
+}
+
+type XSIPSOAPRequest struct {
+	TransactionCode   string `xml:"TransactionCode"`
+	UniqueRefNo      string `xml:"UniqueRefNo"`
+	SchemeCode       string `xml:"SchemeCode"`
+	MemberCode       string `xml:"MemberCode"`
+	ClientCode       string `xml:"ClientCode"`
+	UserId           string `xml:"UserId"`
+	InternalRefNo    string `xml:"InternalRefNo"`
+	TransMode        string `xml:"TransMode"`
+	DpTxnMode        string `xml:"DpTxnMode"`
+	StartDate        string `xml:"StartDate"`
+	FrequencyType    string `xml:"FrequencyType"`
+	FrequencyAllowed string `xml:"FrequencyAllowed"`
+	InstallmentAmount string `xml:"InstallmentAmount"`
+	NoOfInstallment  string `xml:"NoOfInstallment"`
+	Remarks          string `xml:"Remarks"`
+	FolioNo          string `xml:"FolioNo"`
+	FirstOrderFlag   string `xml:"FirstOrderFlag"`
+	Brokerage        string `xml:"Brokerage"`
+	MandateID        string `xml:"MandateID"`
+	SubberCode       string `xml:"SubberCode"`
+	Euin             string `xml:"Euin"`
+	EuinVal          string `xml:"EuinVal"`
+	DPC              string `xml:"DPC"`
+	XsipRegID        string `xml:"XsipRegID"`
+	IPAdd            string `xml:"IPAdd"`
+	Password         string `xml:"Password"`
+	PassKey          string `xml:"PassKey"`
+	Param1           string `xml:"Param1"`
+	Param2           string `xml:"Param2"`
+	Param3           string `xml:"Param3"`
+	Filler1          string `xml:"Filler1"`
+	Filler2          string `xml:"Filler2"`
+	Filler3          string `xml:"Filler3"`
+	Filler4          string `xml:"Filler4"`
+	Filler5          string `xml:"Filler5"`
+	Filler6          string `xml:"Filler6"`
+}
+
+// SOAP Response structure for XSIP
+type XSIPSOAPResponse struct {
+	XMLName xml.Name `xml:"soap:Envelope"`
+	SoapNS  string   `xml:"xmlns:soap,attr"`
+	Body    XSIPSOAPResponseBody `xml:"soap:Body"`
+}
+
+type XSIPSOAPResponseBody struct {
+	XSIPResult XSIPSOAPResult `xml:"XsipOrderEntryParamResponse"`
+}
+
+type XSIPSOAPResult struct {
+	Result string `xml:"XsipOrderEntryParamResult"`
+}
+
 func XSIPHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	// Set SOAP XML content type
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	
+	// CREATE logger and SOAP service here
+	logger := util.NewStandardLogger()
+	xsipSoapService, err := services.NewSOAPClientService(logger)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		soapFault := createXSIPSOAPFault("Failed to initialize SOAP service")
+		xml.NewEncoder(w).Encode(soapFault)
+		return
+	}
 	
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Method not allowed",
-		})
+		soapFault := createXSIPSOAPFault("Method not allowed")
+		xml.NewEncoder(w).Encode(soapFault)
 		return
 	}
 	
 	// Check if SOAP service is available
 	if xsipSoapService == nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "SOAP service unavailable",
-		})
+		soapFault := createXSIPSOAPFault("SOAP service unavailable")
+		xml.NewEncoder(w).Encode(soapFault)
 		return
 	}
 	
-	var req services.XSIPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Read SOAP XML body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Invalid JSON payload",
-		})
+		soapFault := createXSIPSOAPFault("Failed to read request body")
+		xml.NewEncoder(w).Encode(soapFault)
 		return
 	}
 	
-	// Validate required fields
+	// Parse SOAP XML
+	var soapEnv XSIPSOAPEnvelope
+	err = xml.Unmarshal(body, &soapEnv)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		soapFault := createXSIPSOAPFault("Invalid SOAP XML: " + err.Error())
+		xml.NewEncoder(w).Encode(soapFault)
+		return
+	}
+	
+	// Convert SOAP request to internal XSIP request
+	req := convertSOAPToXSIPRequest(&soapEnv.Body.XSIPRequest)
+	
+	// Validate the request
 	if err := validateXSIPRequest(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   err.Error(),
-			Code:    "VALIDATION_ERROR",
-		})
+		soapFault := createXSIPSOAPFault("Validation error: " + err.Error())
+		xml.NewEncoder(w).Encode(soapFault)
 		return
 	}
 	
@@ -66,18 +138,113 @@ func XSIPHandler(w http.ResponseWriter, r *http.Request) {
 	xsipResp, err := xsipSoapService.XSIPOrderEntry(r.Context(), &req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Failed to process XSIP request with BSE service",
-		})
+		soapFault := createXSIPSOAPFault("Failed to process XSIP request with BSE service")
+		xml.NewEncoder(w).Encode(soapFault)
 		return
 	}
 	
-	// Return response
+	// Convert response to SOAP XML
+	soapResponse := convertXSIPResponseToSOAP(xsipResp)
+	
+	// Return SOAP response
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(xsipResp)
+	xml.NewEncoder(w).Encode(soapResponse)
 }
 
+// Helper function to convert SOAP request to internal XSIP format
+func convertSOAPToXSIPRequest(soapReq *XSIPSOAPRequest) services.XSIPRequest {
+	return services.XSIPRequest{
+		TransactionCode:    soapReq.TransactionCode,
+		UniqueRefNo:       soapReq.UniqueRefNo,
+		SchemeCode:        soapReq.SchemeCode,
+		MemberID:          soapReq.MemberCode,
+		ClientCode:        soapReq.ClientCode,
+		UserID:            soapReq.UserId,
+		InternalRefNo:     soapReq.InternalRefNo,
+		TransMode:         soapReq.TransMode,
+		DPTransactionMode: soapReq.DpTxnMode,
+		StartDate:         soapReq.StartDate,
+		FrequencyType:     soapReq.FrequencyType,
+		// Convert string to int for numeric fields
+		FrequencyAllowed:  parseIntOrDefault(soapReq.FrequencyAllowed, 1),
+		InstallmentAmount: parseIntOrDefault(soapReq.InstallmentAmount, 0),
+		NoOfInstallments:  parseIntOrDefault(soapReq.NoOfInstallment, 0),
+		Remarks:           soapReq.Remarks,
+		FolioNo:           soapReq.FolioNo,
+		FirstOrderFlag:    soapReq.FirstOrderFlag,
+		Brokerage:         soapReq.Brokerage,
+		XSIPMandateID:     soapReq.MandateID,
+		SubBrCode:         soapReq.SubberCode,
+		EUIN:              soapReq.Euin,
+		EUINFlag:          soapReq.EuinVal,
+		DPC:               soapReq.DPC,
+		XSIPRegID:         soapReq.XsipRegID,
+		IPAddress:         soapReq.IPAdd,
+		Password:          soapReq.Password,
+		PassKey:           soapReq.PassKey,
+		Param1:            soapReq.Param1,
+		Param2:            soapReq.Param2,
+		Param3:            soapReq.Param3,
+		Filler1:           soapReq.Filler1,
+		Filler2:           soapReq.Filler2,
+		Filler3:           soapReq.Filler3,
+		Filler4:           soapReq.Filler4,
+		Filler5:           soapReq.Filler5,
+		Filler6:           soapReq.Filler6,
+	}
+}
+
+// Helper function to convert XSIP response to SOAP
+func convertXSIPResponseToSOAP(xsipResp *services.XSIPOrderResponse) XSIPSOAPResponse {
+	// Format response as pipe-delimited string (BSE format)
+	result := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s",
+		xsipResp.TransactionCode,
+		xsipResp.UniqueRefNo,
+		xsipResp.MemberID,
+		xsipResp.ClientCode,
+		xsipResp.UserID,
+		xsipResp.XSIPRegID,
+		xsipResp.BSERemarks,
+		xsipResp.SuccessFlag)
+	
+	return XSIPSOAPResponse{
+		SoapNS: "http://schemas.xmlsoap.org/soap/envelope/",
+		Body: XSIPSOAPResponseBody{
+			XSIPResult: XSIPSOAPResult{
+				Result: result,
+			},
+		},
+	}
+}
+
+// Helper function for XSIP SOAP faults
+func createXSIPSOAPFault(message string) interface{} {
+	return map[string]interface{}{
+		"soap:Envelope": map[string]interface{}{
+			"xmlns:soap": "http://schemas.xmlsoap.org/soap/envelope/",
+			"soap:Body": map[string]interface{}{
+				"soap:Fault": map[string]interface{}{
+					"faultcode":   "Client",
+					"faultstring": message,
+				},
+			},
+		},
+	}
+}
+
+// DELETE lines 235-243 (the duplicate function):
+// // Helper function to parse integers (shared with SIP handler)
+// func parseIntOrDefault(s string, defaultVal int) int {
+// 	if s == "" {
+// 		return defaultVal
+// 	}
+// 	// Add proper string to int conversion
+// 	val := 0
+// 	fmt.Sscanf(s, "%d", &val)
+// 	return val
+// }
+
+// Keep existing validateXSIPRequest function
 func validateXSIPRequest(req *services.XSIPRequest) error {
 	// Validate transaction code
 	if req.TransactionCode != "NEW" && req.TransactionCode != "CXL" {
@@ -106,14 +273,8 @@ func validateXSIPRequest(req *services.XSIPRequest) error {
 	if strings.TrimSpace(req.PassKey) == "" {
 		return fmt.Errorf("pass key should not be blank")
 	}
-	if strings.TrimSpace(req.EUINFlag) == "" {
-		return fmt.Errorf("EUIN flag should not be blank")
-	}
-	if strings.TrimSpace(req.DPC) == "" {
-		return fmt.Errorf("DPC should not be blank")
-	}
 	
-	// Validate BSE Code (Filler3) - MANDATORY
+	// Validate BSE Code (Filler3) - MANDATORY for XSIP
 	if strings.TrimSpace(req.Filler3) == "" {
 		return fmt.Errorf("BSE Code (filler3) is mandatory")
 	}
@@ -122,14 +283,6 @@ func validateXSIPRequest(req *services.XSIPRequest) error {
 	if req.Filler3 == "13" && strings.TrimSpace(req.Filler4) == "" {
 		return fmt.Errorf("BSE Code Remark (filler4) is mandatory when BSE Code is '13' (Others)")
 	}
-	
-	// Validate XSIP Mandate ID for XSIP Orders
-	if req.TransactionCode == "NEW" && strings.TrimSpace(req.XSIPMandateID) == "" {
-		return fmt.Errorf("XSIP Mandate ID is mandatory for XSIP Orders")
-	}
-	
-	// Validate ISIP Mandate ID for ISIP Orders (Param2)
-	// Note: This would need additional logic to determine if it's an ISIP order
 	
 	// Validate field lengths
 	if len(req.UniqueRefNo) > 19 {

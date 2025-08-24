@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
@@ -109,6 +110,7 @@ func (cb *ConfigBuilder) LoadFromFile(filename string) *ConfigBuilder {
 	viper.SetConfigName(filename)
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
+	viper.AddConfigPath("..") // Add parent directory (project root) as a config path
 	viper.AddConfigPath("./config")
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -128,6 +130,8 @@ func (cb *ConfigBuilder) LoadFromFile(filename string) *ConfigBuilder {
 func (cb *ConfigBuilder) LoadFromEnv() *ConfigBuilder {
 	// Load .env file if it exists (ignore errors)
 	_ = godotenv.Load()
+	_ = godotenv.Load(".env") // Try current directory
+	_ = godotenv.Load("../.env") // Try parent directory (project root)
 
 	// Enable automatic environment variable reading
 	viper.AutomaticEnv()
@@ -188,9 +192,30 @@ func (c *Config) HasDatabaseConfig() bool {
 
 // loadSecrets loads sensitive configuration from environment variables
 func (cb *ConfigBuilder) loadSecrets() *SecretConfig {
+	// Debug: Print current working directory and check if .env file exists
+	if wd, err := os.Getwd(); err == nil {
+		fmt.Printf("DEBUG: Current working directory: %s\n", wd)
+	}
+	
+	// Check if .env files exist
+	if _, err := os.Stat(".env"); err == nil {
+		fmt.Println("DEBUG: .env file found in current directory")
+	} else {
+		fmt.Printf("DEBUG: .env file not found in current directory: %v\n", err)
+	}
+	
+	if _, err := os.Stat("../.env"); err == nil {
+		fmt.Println("DEBUG: .env file found in parent directory")
+	} else {
+		fmt.Printf("DEBUG: .env file not found in parent directory: %v\n", err)
+	}
+
 	// Parse Kafka brokers from environment
 	var kafkaBrokers []string
-	if brokersList := os.Getenv("KAFKA_BROKERS"); brokersList != "" {
+	brokersList := os.Getenv("KAFKA_BROKERS")
+	fmt.Printf("DEBUG: KAFKA_BROKERS environment variable: '%s'\n", brokersList)
+	
+	if brokersList != "" {
 		brokers := strings.Split(brokersList, ",")
 		for _, broker := range brokers {
 			if trimmed := strings.TrimSpace(broker); trimmed != "" {
@@ -198,6 +223,8 @@ func (cb *ConfigBuilder) loadSecrets() *SecretConfig {
 			}
 		}
 	}
+	
+	fmt.Printf("DEBUG: Parsed Kafka brokers: %v\n", kafkaBrokers)
 
 	return &SecretConfig{
 		// Kafka configuration

@@ -5,22 +5,28 @@ import (
 	"fmt"
 	"net/http"
 	"sapphirebroking.com/sapphire_mf/internal/server/services"
+	"sapphirebroking.com/sapphire_mf/internal/util"
 	"strings"
 )
 
-var enhancedSipService *services.SOAPClientService
+// REMOVE these lines:
+// var enhancedSipService *services.SOAPClientService
+// func init() { ... }
 
-func init() {
-	var err error
-	enhancedSipService, err = services.NewSOAPClientService()
-	if err != nil {
-		// Log error but don't panic - handle gracefully in handler
-	}
-}
-
-// EnhancedSIPCancellationHandler handles Enhanced SIP cancellation requests
 func EnhancedSIPCancellationHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	
+	// CREATE logger and SOAP service here
+	logger := util.NewStandardLogger()
+	enhancedSipService, err := services.NewSOAPClientService(logger)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to initialize SOAP service",
+		})
+		return
+	}
 	
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -42,22 +48,27 @@ func EnhancedSIPCancellationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	var req services.EnhancedSIPCancellationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	err = json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   "Invalid JSON payload",
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+			"code":    "VALIDATION_ERROR",
 		})
 		return
 	}
 	
-	// Validate required fields
+	// REMOVE this duplicate line:
+	// err = json.NewDecoder(r.Body).Decode(&req)
+	
+	// Validate the request (use the already decoded req)
 	if err := validateEnhancedSIPRequest(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			Success: false,
-			Error:   err.Error(),
-			Code:    "VALIDATION_ERROR",
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+			"code":    "VALIDATION_ERROR",
 		})
 		return
 	}

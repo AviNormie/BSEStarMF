@@ -1,12 +1,13 @@
 package services
 
 import (
-	
+	"bytes"
 	"context"
-	
+	"encoding/json"
 	"fmt"
-
+	"io"
 	"net/http"
+	"strings"  // ← ADDED: Missing import
 	"time"
 
 	"sapphirebroking.com/sapphire_mf/internal/util"
@@ -46,6 +47,7 @@ func NewELOGClientService(logger util.Logger) *ELOGClientService {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		// BSE ELOG API endpoint
 		baseURL: "https://bsestarmfdemo.bseindia.com/BSEMFWEBAPI/api/_2FAELOGController/_2FAELOG/w",
 		logger:  logger,
 	}
@@ -53,45 +55,136 @@ func NewELOGClientService(logger util.Logger) *ELOGClientService {
 
 // SubmitELOGRequest submits ELOG request to BSE and returns authentication URL
 func (e *ELOGClientService) SubmitELOGRequest(ctx context.Context, req *ELOGRequest) (*ELOGResponse, error) {
-	e.logger.Info("Submitting ELOG request for client: %s", req.ClientCode)
+	e.logger.Info("Submitting ELOG request to BSE for client: %s", req.ClientCode)
 
-	// For demo purposes, simulate BSE responses based on client code
-	// In production, this would make actual HTTP call to BSE
-	response := e.simulateBSEResponse(req)
+	// Convert request to JSON
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		e.logger.Error("Failed to marshal ELOG request: %v", err)
+		return &ELOGResponse{
+			StatusCode: "101",
+			AuthURL:    "",
+			ErrorDesc:  "Request serialization failed",
+			IntRefNo:   req.IntRefNo,
+		}, nil
+	}
 
-	e.logger.Info("ELOG request completed for client: %s, status: %s", req.ClientCode, response.StatusCode)
-	return response, nil
+	// Create HTTP request to BSE
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", e.baseURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		e.logger.Error("Failed to create HTTP request: %v", err)
+		return &ELOGResponse{
+			StatusCode: "101",
+			AuthURL:    "",
+			ErrorDesc:  "Request creation failed",
+			IntRefNo:   req.IntRefNo,
+		}, nil
+	}
+
+	// Set headers for BSE API
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("User-Agent", "BSE-StarMF-Client/1.0")
+
+	// Make actual call to BSE
+	e.logger.Info("Making HTTP request to BSE ELOG API: %s", e.baseURL)
+	resp, err := e.client.Do(httpReq)
+	if err != nil {
+		e.logger.Error("BSE ELOG API connection failed: %v", err)
+		return &ELOGResponse{
+			StatusCode: "101",
+			AuthURL:    "",
+			ErrorDesc:  "Failed to connect to BSE service",
+			IntRefNo:   req.IntRefNo,
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		e.logger.Error("Failed to read BSE response: %v", err)
+		return &ELOGResponse{
+			StatusCode: "101",
+			AuthURL:    "",
+			ErrorDesc:  "Failed to read BSE response",
+			IntRefNo:   req.IntRefNo,
+		}, nil
+	}
+
+	e.logger.Info("BSE ELOG API response status: %d, body length: %d", resp.StatusCode, len(respBody))
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		e.logger.Error("BSE ELOG API returned error status: %d, body: %s", resp.StatusCode, string(respBody))
+		return &ELOGResponse{
+			StatusCode: "101",
+			AuthURL:    "",
+			ErrorDesc:  fmt.Sprintf("BSE API error: HTTP %d", resp.StatusCode),
+			IntRefNo:   req.IntRefNo,
+		}, nil
+	}
+
+	// Parse BSE response
+	var bseResponse ELOGResponse
+	if err := json.Unmarshal(respBody, &bseResponse); err != nil {
+		e.logger.Error("Failed to parse BSE ELOG response: %v, body: %s", err, string(respBody))
+		
+		// Try to handle non-JSON response from BSE
+		responseStr := string(respBody)
+		if responseStr != "" {
+			// BSE might return pipe-delimited or other format
+			return e.parseBSETextResponse(responseStr, req.IntRefNo), nil  // ← FIXED: Added nil error
+		}
+		
+		return &ELOGResponse{
+			StatusCode: "101",
+			AuthURL:    "",
+			ErrorDesc:  "Invalid response format from BSE",
+			IntRefNo:   req.IntRefNo,
+		}, nil
+	}
+
+	e.logger.Info("ELOG request completed for client: %s, BSE status: %s", req.ClientCode, bseResponse.StatusCode)
+	return &bseResponse, nil
 }
 
-// simulateBSEResponse simulates BSE ELOG responses for testing
-func (e *ELOGClientService) simulateBSEResponse(req *ELOGRequest) *ELOGResponse {
-	// Simulate different scenarios based on client code
-	switch req.ClientCode {
-	case "invalid123":
-		// Scenario 1: Invalid Client Code
+// parseBSETextResponse handles non-JSON responses from BSE (pipe-delimited format)
+func (e *ELOGClientService) parseBSETextResponse(response, intRefNo string) *ELOGResponse {
+	e.logger.Info("Parsing BSE text response: %s", response)
+	
+	// BSE might return format like: "100|authurl|success_message" or "101|error_message"
+	parts := strings.Split(response, "|")
+	if len(parts) < 2 {
 		return &ELOGResponse{
 			StatusCode: "101",
 			AuthURL:    "",
-			ErrorDesc:  "Invalid Client Code",
-			IntRefNo:   req.IntRefNo,
+			ErrorDesc:  "Invalid BSE response format",
+			IntRefNo:   intRefNo,
 		}
-	case "already123":
-		// Scenario 2: Authentication already done
-		return &ELOGResponse{
-			StatusCode: "101",
-			AuthURL:    "",
-			ErrorDesc:  "FAILED : AUTHENTICATION IS ALREADY DONE",
-			IntRefNo:   req.IntRefNo,
-		}
-	default:
-		// Scenario 3: Success
-		authURL := fmt.Sprintf("https://www.bsestarmf.in/3log/liefwbc23fq8pfg8qpwcwq8u8_%s_%d", 
-			req.ClientCode, time.Now().Unix())
+	}
+	
+	statusCode := strings.TrimSpace(parts[0])
+	
+	if statusCode == "100" && len(parts) >= 3 {
+		// Success response with auth URL
 		return &ELOGResponse{
 			StatusCode: "100",
-			AuthURL:    authURL,
-			ErrorDesc:  "ELOG Link Generated Successfully",
-			IntRefNo:   req.IntRefNo,
+			AuthURL:    strings.TrimSpace(parts[1]),
+			ErrorDesc:  strings.TrimSpace(parts[2]),
+			IntRefNo:   intRefNo,
+		}
+	} else {
+		// Error response
+		errorDesc := "Unknown error"
+		if len(parts) >= 2 {
+			errorDesc = strings.TrimSpace(parts[1])
+		}
+		return &ELOGResponse{
+			StatusCode: "101",
+			AuthURL:    "",
+			ErrorDesc:  errorDesc,
+			IntRefNo:   intRefNo,
 		}
 	}
 }
