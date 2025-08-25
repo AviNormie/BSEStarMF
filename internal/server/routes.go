@@ -15,28 +15,34 @@ func SetupRoutes(router chi.Router) {
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Logger)
-	router.Use(cors.AllowAll().Handler)              // TODO configure CORS properly
-	router.Use(middleware.Timeout(60 * time.Second)) // Set a timeout of 60 seconds
+	router.Use(cors.AllowAll().Handler)
+	router.Use(middleware.Timeout(60 * time.Second))
 	router.Use(middleware.Recoverer)
 
 	// Create SOAP service instance
 	soapService, err := services.NewSOAPClientService()
 	if err != nil {
-		// Handle error appropriately - for now, we'll continue without SOAP service
-		// In production, you might want to panic or return an error
+		// Log error but continue - handle gracefully in handlers
+		panic("Failed to initialize SOAP service: " + err.Error())
 	}
 
+	// Add a root health check
+	router.Get("/health", handlers.HealthHandler)
+
+	// API v1 routes
 	router.Route(BaseUrl, func(r chi.Router) {
 		r.Get("/health", handlers.HealthHandler)
 		
-		// SOAP-based SIP/XSIP Registration and Cancellation endpoints
-		r.Post("/sip/order", handlers.SIPHandler)
-		r.Post("/xsip/order", handlers.XSIPHandler)
+		// Authentication endpoint
+		r.Post("/auth/getPassword", handlers.GetPasswordHandler)
 		
-		// Lumpsum order endpoint
-		r.Post("/lumpsum/order", handlers.LumpsumHandler(soapService))
-		// Enhanced JSON-based SIP/XSIP Cancellation endpoints
-		r.Post("/enhanced/sip/cancellation", handlers.EnhancedSIPCancellationHandler(soapService))
-		r.Post("/enhanced/xsip/cancellation", handlers.EnhancedXSIPCancellationHandler(soapService))
+		// Order entry endpoints
+		r.Post("/order/sip", handlers.SIPHandler)
+		r.Post("/order/xsip", handlers.XSIPHandler)
+		r.Post("/order/lumpsum", handlers.LumpsumHandler(soapService))
+		
+		// Enhanced cancellation endpoints
+		r.Post("/cancellation/enhanced-sip", handlers.EnhancedSIPCancellationHandler(soapService))
+		r.Post("/cancellation/enhanced-xsip", handlers.EnhancedXSIPCancellationHandler(soapService))
 	})
 }

@@ -30,6 +30,12 @@ func NewHTTPServer(cfg *config.ServiceConfig, logger util.Logger) *HTTPServer {
 	// Setup routes with middleware
 	SetupRoutes(router)
 
+	// Debug: Print all registered routes
+	chi.Walk(router, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+		logger.Info("Registered route: %s %s", method, route)
+		return nil
+	})
+
 	// Determine the address to bind to
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	if cfg.Host == "" {
